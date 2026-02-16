@@ -17,28 +17,11 @@ def data_provider(args, flag):
 
     if args.task_name == 'classification':
         drop_last = False
-        
-        # Train 모드: scaler 없이 로드 (새로 생성되고 fit됨)
-        if flag == 'train':
-            data_set = Data(
-                args = args,
-                root_path = args.root_path,
-                flag = flag,
-                scaler = None
-            )
-            # Train scaler 캐시에 저장
-            _scaler_cache[args.data] = data_set.scaler
-        # Test 모드: train에서 fit한 scaler 전달
-        else:
-            scaler = _scaler_cache.get(args.data)
-            if scaler is None:
-                raise ValueError("Test 모드 실행 전에 Train 모드를 먼저 실행하여 scaler를 초기화하세요.")
-            data_set = Data(
-                args = args,
-                root_path = args.root_path,
-                flag = flag,
-                scaler = scaler
-            )
+        data_set = Data(
+            args = args,
+            root_path = args.root_path,
+            flag = flag
+        )
 
         data_loader = DataLoader(
             data_set,

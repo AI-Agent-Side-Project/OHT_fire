@@ -48,7 +48,6 @@ class Exp_Classification(Exp_Basic):
         total_loss = []
         preds = []
         trues = []
-        batch_xs = []  # 원본 정규화된 데이터 저장
         self.model.eval()
         with torch.no_grad():
             for i, (batch_x, label) in enumerate(tqdm(vali_loader)):
@@ -63,7 +62,6 @@ class Exp_Classification(Exp_Basic):
 
                 preds.append(outputs.detach())
                 trues.append(label)
-                batch_xs.append(batch_x.cpu().numpy())
 
         total_loss = np.average(total_loss)
 
@@ -72,15 +70,12 @@ class Exp_Classification(Exp_Basic):
         probs = torch.nn.functional.softmax(preds)  # (total_samples, num_classes) est. prob. for each class and sample
         predictions = torch.argmax(probs, dim=1).cpu().numpy()  # (total_samples,) int class index for each sample
         trues = trues.flatten().cpu().numpy()
-        
-        # 정규화된 입력 데이터를 원본 스케일로 역변환
-        batch_xs = np.concatenate(batch_xs, axis=0)
-        batch_xs_inverse = vali_data.inverse_transform(batch_xs)
+
         
         accuracy = cal_accuracy(predictions, trues)
 
         self.model.train()
-        return total_loss, accuracy, batch_xs_inverse, predictions, trues
+        return total_loss, accuracy
 
     def train(self, setting):
         train_data, train_loader = self._get_data(flag='TRAIN')
@@ -131,8 +126,8 @@ class Exp_Classification(Exp_Basic):
 
             print("Epoch: {} cost time: {}".format(epoch + 1, time.time() - epoch_time))
             train_loss = np.average(train_loss)
-            vali_loss, val_accuracy, _, _, _ = self.vali(vali_data, vali_loader, criterion)
-            test_loss, test_accuracy, _, _, _ = self.vali(test_data, test_loader, criterion)
+            vali_loss, val_accuracy = self.vali(vali_data, vali_loader, criterion)
+            test_loss, test_accuracy = self.vali(test_data, test_loader, criterion)
 
             print(
                 "Epoch: {0}, Steps: {1} | Train Loss: {2:.3f} Vali Loss: {3:.3f} Vali Acc: {4:.3f} Test Loss: {5:.3f} Test Acc: {6:.3f}"
@@ -148,6 +143,11 @@ class Exp_Classification(Exp_Basic):
         return self.model
 
     def test(self, setting, test=0):
+        self.min = np.array([27.0, 18.0, 9.0, 6.0, 1.8, 0.55, 0.2, 0.29, 22.0, 35.0, 511.0])
+        self.max = np.array([85.1, 22.0, 14.0, 10.0, 168.76, 173.36, 171.73, 170.4, 23.0, 36.0, 530.0])
+        self.mean = np.array([31.915677, 19.995953, 11.837508, 8.001406, 6.191396, 13.110211, 4.784334, 2.550489, 22.500381, 35.502464, 520.499026])
+        self.std = np.array([8.053964, 0.570940, 0.649219, 0.746791, 17.315621, 28.457335,17.689338, 12.563485, 0.500004, 0.499998, 5.765662])
+        self.eps = 1e-8
         test_data, test_loader = self._get_data(flag='TEST')
         if test:
             print('loading model')
@@ -155,7 +155,6 @@ class Exp_Classification(Exp_Basic):
 
         preds = []
         trues = []
-        batch_xs = []  # 원본 정규화된 데이터 저장
         folder_path = './test_results/' + setting + '/'
         if not os.path.exists(folder_path):
             os.makedirs(folder_path)
@@ -170,7 +169,6 @@ class Exp_Classification(Exp_Basic):
 
                 preds.append(outputs.detach())
                 trues.append(label)
-                batch_xs.append(batch_x.cpu().numpy())
 
         preds = torch.cat(preds, 0)
         trues = torch.cat(trues, 0)
@@ -179,10 +177,6 @@ class Exp_Classification(Exp_Basic):
         probs = torch.nn.functional.softmax(preds)  # (total_samples, num_classes) est. prob. for each class and sample
         predictions = torch.argmax(probs, dim=1).cpu().numpy()  # (total_samples,) int class index for each sample
         trues = trues.flatten().cpu().numpy()
-        
-        # 정규화된 입력 데이터를 원본 스케일로 역변환
-        batch_xs = np.concatenate(batch_xs, axis=0)
-        batch_xs_inverse = test_data.inverse_transform(batch_xs)
         
         accuracy = cal_accuracy(predictions, trues)
 
