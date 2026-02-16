@@ -87,7 +87,7 @@ if __name__ == '__main__':
     if args.is_training:
         for ii in range(args.itr):
             exp = Exp(args)
-            setting = '{}_{}'.format('TSC', 'model')
+            setting = '{}_dm{}_dff{}_topk{}_sl{}_n{}'.format('TSC', args.d_model, args.d_ff, args.top_k, args.seq_len, args.norm)
 
             print('>>>>>>>start training : {}>>>>>>>>>>>>>>>>>>>>>>>>>>'.format(setting))
             exp.train(setting)
@@ -101,7 +101,7 @@ if __name__ == '__main__':
     else:
         exp = Exp(args)
         ii = 0
-        setting = '{}_{}'.format('TSC', 'model')
+        setting = '{}_dm{}_dff{}_topk{}_sl{}_n{}'.format('TSC', args.d_model, args.d_ff, args.top_k, args.seq_len, args.norm)
 
         print('>>>>>>>testing : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))
         exp.test(setting, test=1)

@@ -12,7 +12,7 @@ from utils.augmentation import run_augmentation_single
 warnings.filterwarnings('ignore')
 
 class OHT_fire_Loader(Dataset):
-    def __init__(self, args, root_path, flag = None, scaler = None):
+    def __init__(self, args, root_path, flag = None):
         self.args = args
         self.root_path = root_path
         self.flag = flag
@@ -55,11 +55,10 @@ class OHT_fire_Loader(Dataset):
             label_li = []
             for file_dir in file_list:
                 df = pd.read_csv(file_dir)
-                # Train 데이터로 scaler fit (모든 train 파일의 데이터로 fit)
-                self.scaler.fit(df[self.ts_target_col].values)
                 for i in range(0, len(df) - self.args.seq_len + 1, self.args.stride):
                     sub_df = df.iloc[i : i + self.args.seq_len, :]
-                    # Train 데이터에 scaler 적용 (transform)
+
+                    raw_data = sub_df[self.ts_target_col].values
                     if self.args.norm == 'std':
                         normalized_data = (raw_data - self.mean) / (self.std + self.eps)
                     elif self.args.norm == 'minmax':
