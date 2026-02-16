@@ -58,7 +58,7 @@ if __name__ == '__main__':
     parser.add_argument('--stride' , type=int, default=1, help='data stride')
     parser.add_argument('--seq_len', type=int, default=96, help='input sequence length')
     parser.add_argument('--data', type=str, required=True, default='OHT_fire', help='dataset type')
-    parser.add_argument('--root_path', type=str, default='/home/sung145/database/OHT/', help='root path of the data file')
+    parser.add_argument('--root_path', type=str, default='./database/OHT/', help='root path of the data file')
     parser.add_argument('--freq', type=str, default='h',
                         help='freq for time features encoding, options:[s:secondly, t:minutely, h:hourly, d:daily, b:business days, w:weekly, m:monthly], you can also use more detailed freq like 15min or 3h')
 
