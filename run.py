@@ -21,6 +21,7 @@ if __name__ == '__main__':
     parser.add_argument('--task_name', type = str, required = True, default = 'classification')
     parser.add_argument('--is_training', type = int, required = True, default = 0, help = 'status')
     parser.add_argument('--model', type = str, required = True, default = 'TimesNet')
+    parser.add_argument('--normalization', type = str, default = 'std')
 
     # data loader
     parser.add_argument('--date', type = str, default = 'ETTh1')
