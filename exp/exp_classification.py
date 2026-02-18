@@ -380,7 +380,57 @@ class Exp_Classification(Exp_Basic):
         all_predictions = predict_flat(X_test_flat)
         all_pred_classes = np.argmax(all_predictions, axis=1)
         
-        # 5. 상세 분석 결과 저장
+        # 5. 샘플별 설명 생성 (Instance-level explanation)
+        print("Generating instance-level explanations...")
+        sample_explanations = []
+        
+        for sample_idx in range(len(X_test)):
+            pred_class = all_pred_classes[sample_idx]
+            pred_prob = all_predictions[sample_idx]
+            true_class = y_test[sample_idx]
+            
+            # 예측된 클래스의 SHAP values 추출
+            pred_class_shap = shap_values_list[pred_class][sample_idx]  # (num_features,)
+            
+            # 특성별 중요도 계산 (시간차원 평균)
+            if len(background_data.shape) == 3:
+                pred_class_shap_2d = pred_class_shap.reshape(background_data.shape[1:])
+                feature_contributions = np.mean(np.abs(pred_class_shap_2d), axis=0)  # (num_features,)
+            else:
+                feature_contributions = np.abs(pred_class_shap)
+            
+            # 상위 5개 중요 특성 찾기
+            top_k = 5
+            top_feature_indices = np.argsort(feature_contributions)[-top_k:][::-1]
+            top_contributions = feature_contributions[top_feature_indices]
+            
+            # 대조 클래스 (두 번째로 높은 확률의 클래스) 찾기
+            contrast_class = np.argsort(pred_prob)[-2]
+            contrast_prob = pred_prob[contrast_class]
+            
+            sample_explanation = {
+                'sample_idx': int(sample_idx),
+                'predicted_class': int(pred_class),
+                'predicted_probability': float(pred_prob[pred_class]),
+                'true_class': int(true_class),
+                'is_correct': int(pred_class) == int(true_class),
+                'all_class_probabilities': {
+                    f'class_{i}': float(pred_prob[i]) for i in range(len(pred_prob))
+                },
+                'contrast_class': int(contrast_class),
+                'contrast_probability': float(contrast_prob),
+                'top_contributing_features': [
+                    {
+                        'feature_idx': int(feat_idx),
+                        'contribution_magnitude': float(top_contributions[rank])
+                    }
+                    for rank, feat_idx in enumerate(top_feature_indices)
+                ],
+                'feature_contribution_scores': feature_contributions.tolist()
+            }
+            sample_explanations.append(sample_explanation)
+        
+        # 6. 상세 분석 결과 저장
         analysis_results = {
             'total_samples': len(X_test),
             'num_classes': len(shap_values_list),
@@ -389,10 +439,19 @@ class Exp_Classification(Exp_Basic):
             'predictions': all_pred_classes.tolist(),
             'true_labels': y_test.tolist(),
             'prediction_probabilities': all_predictions.tolist(),
+            'sample_explanations': sample_explanations
         }
         
         with open(os.path.join(xai_folder, 'xai_analysis.json'), 'w') as f:
             json.dump(analysis_results, f, indent=4)
+        
+        # 샘플 설명을 별도 파일로 저장 (더 쉬운 접근)
+        sample_explanations_file = []
+        for exp in sample_explanations:
+            sample_explanations_file.append(exp)
+        
+        with open(os.path.join(xai_folder, 'sample_explanations.json'), 'w') as f:
+            json.dump(sample_explanations_file, f, indent=4)
         
         # 6. 시각화 - Feature Importance
         print("Creating visualizations...")

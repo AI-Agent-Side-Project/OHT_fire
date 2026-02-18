@@ -60,6 +60,154 @@ def get_stacked_predictions(stack):
         return list(stack['data'])
     return []
 
+def _display_sample_explanation(explanation, sample_idx):
+    """
+    샘플별 설명 표시 (Instance-level SHAP explanation)
+    """
+    # 기본 정보
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        pred_class = explanation['predicted_class']
+        pred_prob = explanation['predicted_probability']
+        st.metric(
+            "Predicted Class",
+            f"Class {pred_class}",
+            f"{pred_prob:.1%}"
+        )
+    
+    with col2:
+        true_class = explanation['true_class']
+        is_correct = explanation['is_correct']
+        status = "✅ Correct" if is_correct else "❌ Wrong"
+        st.metric(
+            "True Class",
+            f"Class {true_class}",
+            status
+        )
+    
+    with col3:
+        contrast_class = explanation['contrast_class']
+        contrast_prob = explanation['contrast_probability']
+        st.metric(
+            "2nd Highest Class",
+            f"Class {contrast_class}",
+            f"{contrast_prob:.1%}"
+        )
+    
+    with col4:
+        margin = explanation['predicted_probability'] - explanation['contrast_probability']
+        st.metric(
+            "Confidence Margin",
+            f"{margin:.1%}",
+            delta=None
+        )
+    
+    st.markdown("---")
+    
+    # 확률 분포
+    st.subheader("Class Probability Distribution")
+    probs_dict = explanation['all_class_probabilities']
+    class_labels = sorted(probs_dict.keys())
+    class_probs = [probs_dict[label] for label in class_labels]
+    
+    fig, ax = plt.subplots(figsize=(10, 4))
+    colors = ['#ff6b6b' if label == f'class_{explanation["predicted_class"]}' else '#4dabf7' 
+              for label in class_labels]
+    bars = ax.bar(class_labels, class_probs, color=colors, alpha=0.7, edgecolor='black', linewidth=1.5)
+    ax.set_ylabel('Probability', fontsize=12, fontweight='bold')
+    ax.set_title(f'Predicted Class Probabilities - Sample {sample_idx}', fontsize=13, fontweight='bold')
+    ax.set_ylim([0, 1])
+    ax.grid(True, alpha=0.3, axis='y')
+    
+    # 확률 값 표시
+    for bar, prob in zip(bars, class_probs):
+        height = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width()/2., height,
+               f'{prob:.2%}', ha='center', va='bottom', fontweight='bold', fontsize=10)
+    
+    plt.tight_layout()
+    st.pyplot(fig)
+    
+    st.markdown("---")
+    
+    # 예측에 기여한 상위 특성 (Instance-level)
+    st.subheader(f"🎯 Top Features That Predicted Class {explanation['predicted_class']}")
+    
+    top_features = explanation['top_contributing_features']
+    
+    # 상위 특성 시각화
+    fig, ax = plt.subplots(figsize=(10, 5))
+    feature_names = [f"Feature {f['feature_idx']}" for f in top_features]
+    contributions = [f['contribution_magnitude'] for f in top_features]
+    colors_features = plt.cm.RdYlGn_r(np.linspace(0.3, 0.7, len(feature_names)))
+    
+    bars = ax.barh(feature_names, contributions, color=colors_features, edgecolor='black', linewidth=1.5)
+    ax.set_xlabel('Contribution Magnitude |SHAP|', fontsize=11, fontweight='bold')
+    ax.set_title(f'Top Contributing Features for Class {explanation["predicted_class"]} - Sample {sample_idx}', 
+                fontsize=12, fontweight='bold')
+    ax.invert_yaxis()
+    
+    # 값 표시
+    for bar, contrib in zip(bars, contributions):
+        width = bar.get_width()
+        ax.text(width, bar.get_y() + bar.get_height()/2.,
+               f'{contrib:.4f}', ha='left', va='center', fontweight='bold', fontsize=10)
+    
+    plt.tight_layout()
+    st.pyplot(fig)
+    
+    # 특성별 기여도 테이블
+    st.markdown("#### Feature Contribution Details")
+    feature_contribution_df = pd.DataFrame({
+        'Rank': range(1, len(top_features) + 1),
+        'Feature Index': [f['feature_idx'] for f in top_features],
+        'Contribution Score': [f['contribution_magnitude'] for f in top_features],
+        'Relative Importance': [f"{f['contribution_magnitude']/contributions[0]*100:.1f}%" for f in top_features]
+    })
+    st.dataframe(feature_contribution_df, use_container_width=True, hide_index=True)
+    
+    # 모든 특성의 기여도 (히트맵)
+    st.markdown("#### All Features Contribution Heatmap")
+    all_contributions = explanation['feature_contribution_scores']
+    
+    # reshape for visualization (seq_len x num_features 형태 가정)
+    # 만약 단순 1D라면 그대로 표시
+    fig, ax = plt.subplots(figsize=(14, 3))
+    im = ax.imshow([all_contributions], cmap='RdYlGn_r', aspect='auto')
+    ax.set_xlabel('Feature Index', fontsize=11, fontweight='bold')
+    ax.set_ylabel('Sample', fontsize=11, fontweight='bold')
+    ax.set_title(f'All Features Contribution Scores for Class {explanation["predicted_class"]}', 
+                fontsize=12, fontweight='bold')
+    ax.set_yticks([0])
+    ax.set_yticklabels([f'Sample {sample_idx}'])
+    
+    plt.colorbar(im, ax=ax, label='|SHAP value|')
+    plt.tight_layout()
+    st.pyplot(fig)
+    
+    # 해석
+    st.markdown("#### 📋 Interpretation")
+    explanation_text = f"""
+    **Summary:** This sample was predicted as **Class {explanation['predicted_class']}** 
+    with a confidence of **{explanation['predicted_probability']:.1%}**.
+    
+    **Top Contributing Features:** The model's decision was primarily influenced by:
+    """
+    for i, feature in enumerate(top_features[:3], 1):
+        explanation_text += f"\n{i}. Feature {feature['feature_idx']} (score: {feature['contribution_magnitude']:.4f})"
+    
+    explanation_text += f"""
+    
+    **Prediction Confidence:** The margin between the predicted class and the second-highest class 
+    is {explanation['predicted_probability'] - explanation['contrast_probability']:.1%}, 
+    indicating a {'strong' if explanation['predicted_probability'] - explanation['contrast_probability'] > 0.3 else 'moderate' if explanation['predicted_probability'] - explanation['contrast_probability'] > 0.15 else 'weak'} prediction.
+    
+    **Correctness:** This prediction is {'✅ CORRECT' if explanation['is_correct'] else '❌ INCORRECT'}.
+    """
+    
+    st.info(explanation_text)
+
 # 커스텀 CSS
 st.markdown("""
 <style>
@@ -142,9 +290,10 @@ if st.sidebar.button("🔄 Clear History", help="Clear all stacked prediction da
 if selected_model:
     
     # Tab 생성
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    tab1, tab2, tab2_5, tab3, tab4, tab5 = st.tabs([
         "📊 Model Predictions",
         "🔍 XAI Analysis",
+        "🎯 Sample Explanation",
         "📈 Feature Importance",
         "⚠️ Alarm & Insights",
         "📚 Prediction History"
@@ -335,9 +484,63 @@ if selected_model:
             st.warning("XAI analysis results not found. Please run with --use_xai flag.")
     
     # ============================================
-    # TAB 3: Feature Importance
+    # TAB 2.5: Sample Explanation (Instance-level)
     # ============================================
-    with tab3:
+    with tab2_5:
+        st.subheader("🎯 Why Was This Sample Predicted as This Class?")
+        
+        if xai_available:
+            # sample_explanations.json 로드
+            sample_exp_file = xai_dir / 'sample_explanations.json'
+            
+            if sample_exp_file.exists():
+                with open(sample_exp_file, 'r') as f:
+                    sample_explanations = json.load(f)
+                
+                st.markdown("""
+                This section explains **why the model made a specific prediction** for each sample.
+                Instead of showing global feature importance, it shows the actual features that contributed
+                to each sample being classified as a particular class.
+                """)
+                
+                # 샘플 선택 UI
+                col1, col2 = st.columns([3, 1])
+                
+                with col1:
+                    sample_selection = st.selectbox(
+                        "Select a sample to explain:",
+                        range(len(sample_explanations)),
+                        format_func=lambda i: f"Sample {i} → Predicted: Class {sample_explanations[i]['predicted_class']} (True: Class {sample_explanations[i]['true_class']})"
+                    )
+                
+                with col2:
+                    show_all = st.checkbox("Show all samples", False)
+                
+                st.markdown("---")
+                
+                if show_all:
+                    # 모든 샘플 표시
+                    for idx, exp in enumerate(sample_explanations):
+                        with st.expander(
+                            f"📌 Sample {idx}: Predicted as **Class {exp['predicted_class']}** "
+                            f"(Prob: {exp['predicted_probability']:.2%}) | "
+                            f"True: Class {exp['true_class']} {'✅' if exp['is_correct'] else '❌'}"
+                        ):
+                            _display_sample_explanation(exp, idx)
+                else:
+                    # 선택된 샘플만 표시
+                    exp = sample_explanations[sample_selection]
+                    _display_sample_explanation(exp, sample_selection)
+                    
+            else:
+                st.warning("Sample explanations file not found. Please re-run XAI analysis.")
+        else:
+            st.warning("XAI analysis results not found. Please run with --use_xai flag.")
+    
+    # ============================================
+    # TAB 4: Feature Importance
+    # ============================================
+    with tab4:
         st.subheader("Feature Importance Analysis")
         
         if xai_available:
@@ -397,9 +600,9 @@ if selected_model:
             st.warning("XAI analysis results not found.")
     
     # ============================================
-    # TAB 4: Alarm & Insights
+    # TAB 5: Alarm & Insights
     # ============================================
-    with tab4:
+    with tab5:
         st.subheader("⚠️ Alarm System & Risk Assessment")
         
         if analysis_file and analysis_file.exists():
@@ -612,9 +815,9 @@ if selected_model:
             st.warning("No prediction results found.")
     
     # ============================================
-    # TAB 5: Prediction History (신규)
+    # TAB 6: Prediction History (신규)
     # ============================================
-    with tab5:
+    with tab6:
         st.subheader("📚 Stacked Prediction History")
         
         # 현재 스택 정보
