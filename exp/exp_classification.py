@@ -13,6 +13,7 @@ import pdb
 import shap
 import matplotlib.pyplot as plt
 import json
+import joblib
 
 warnings.filterwarnings('ignore')
 
@@ -142,6 +143,12 @@ class Exp_Classification(Exp_Basic):
         best_model_path = path + '/' + 'checkpoint.pth'
         self.model.load_state_dict(torch.load(best_model_path))
 
+        # Save scaler to pickle file for inference consistency
+        if hasattr(self, 'scaler') and self.scaler is not None:
+            scaler_path = path + '/' + 'scaler.pkl'
+            joblib.dump(self.scaler, scaler_path)
+            print(f"✓ Scaler saved to {scaler_path}")
+        
         return self.model
 
     def test(self, setting, test=0):

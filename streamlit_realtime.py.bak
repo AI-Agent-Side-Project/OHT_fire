@@ -1,0 +1,311 @@
+"""
+Streamlit 실시간 대시보드
+
+사용법:
+    streamlit run streamlit_realtime.py
+"""
+
+import streamlit as st
+import asyncio
+import pandas as pd
+import numpy as np
+import plotly.graph_objects as go
+import plotly.express as px
+from pathlib import Path
+from datetime import datetime
+import time
+import pickle
+
+from agents import (
+    DataLoaderAgent,
+    InferenceAgent,
+    XAIAgent,
+    ReportAgent,
+    DashboardAgent,
+    RealtimeOrchestrator
+)
+
+# ============================================
+# 페이지 설정
+# ============================================
+st.set_page_config(
+    page_title="🔥 OHT Fire Monitor",
+    page_icon="🔥",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+st.title("🔥 OHT Fire - 실시간 Multi-Agent 모니터링 시스템")
+st.markdown("---")
+
+# ============================================
+# Session State 초기화
+# ============================================
+if 'orchestrator' not in st.session_state:
+    st.session_state.orchestrator = None
+if 'is_running' not in st.session_state:
+    st.session_state.is_running = False
+if 'csv_path' not in st.session_state:
+    st.session_state.csv_path = None
+if 'current_result' not in st.session_state:
+    st.session_state.current_result = None
+if 'clicked_point_idx' not in st.session_state:
+    st.session_state.clicked_point_idx = None
+if 'selected_analysis' not in st.session_state:
+    st.session_state.selected_analysis = None
+if 'timeseries_data' not in st.session_state:
+    st.session_state.timeseries_data = None
+if 'error_history' not in st.session_state:
+    st.session_state.error_history = []
+if 'window_size' not in st.session_state:
+    st.session_state.window_size = 16
+
+# ============================================
+# 사이드바 설정
+# ============================================
+with st.sidebar:
+    st.header("⚙️ 설정")
+    
+    # CSV 파일 선택
+    csv_files = sorted(Path('database/OHT/Test/Data').glob('*.csv'))
+    if csv_files:
+        selected_csv = st.selectbox(
+            "📁 CSV 파일 선택",
+            [str(f.name) for f in csv_files],
+            key="csv_select"
+        )
+        st.session_state.csv_path = Path('database/OHT/Test/Data') / selected_csv
+    else:
+        st.warning("❌ CSV 파일을 찾을 수 없습니다")
+        st.session_state.csv_path = None
+    
+    st.divider()
+    
+    # 모니터링 제어
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("🟢 시작", use_container_width=True, key="start_btn"):
+            st.session_state.is_running = True
+            st.rerun()
+    
+    with col2:
+        if st.button("🛑 중지", use_container_width=True, key="stop_btn"):
+            st.session_state.is_running = False
+            st.rerun()
+    
+    st.divider()
+    
+    # 설정
+    checkpoint_path = st.text_input(
+        "📦 체크포인트 경로",
+        value="checkpoints/TSC_dm64_dff128_topk3_sl16_nminmax",
+        key="checkpoint_input"
+    )
+    
+    device = st.selectbox(
+        "🖥️ 디바이스",
+        ["cpu", "cuda"],
+        key="device_select"
+    )
+    
+    window_size = st.slider(
+        "📊 윈도우 크기",
+        min_value=16,
+        max_value=256,
+        value=16,
+        key="window_slider"
+    )
+    st.session_state.window_size = window_size
+    st.session_state.checkpoint_path = checkpoint_path
+    st.session_state.device = device
+
+# ============================================
+# 메인 콘텐츠
+# ============================================
+
+if st.session_state.is_running and st.session_state.csv_path:
+    placeholder_alerts = st.empty()
+    placeholder_report = st.empty()
+    
+    # ========================================
+    # Orchestrator 초기화
+    # ========================================
+    if st.session_state.orchestrator is None:
+        with st.spinner("🔄 시스템 초기화 중..."):
+            try:
+                # Scaler 로드 경로 설정 (checkpoint 디렉토리에서)
+                scaler_pkl_path = f"{checkpoint_path}/scaler.pkl"
+                
+                # 에이전트 생성
+                data_loader = DataLoaderAgent(
+                    csv_path=str(st.session_state.csv_path),
+                    window_size=window_size,
+                    delay=1.0,
+                    norm_method='minmax',  # OHT_fire 원본과 동일 설정
+                    scaler=None,
+                    scaler_path=scaler_pkl_path  # 학습 시 저장한 scaler 로드
+                )
+                
+                inference = InferenceAgent(
+                    checkpoint_path=checkpoint_path,
+                    device=device
+                )
+                
+                # DataLoader에서 fit된 scaler 가져오기 (초기화 후)
+                # XAI agent 생성 전에 data_loader 초기화 필요
+                
+                feature_names = [f"Sensor_{i}" for i in range(11)]
+                
+                def model_predict(x):
+                    return np.random.randn(x.shape[0], 4)
+                
+                xai = XAIAgent(
+                    model=model_predict,
+                    feature_names=feature_names
+                )
+                
+                report = ReportAgent()
+                dashboard = DashboardAgent()
+                
+                # Orchestrator 설정
+                orchestrator = RealtimeOrchestrator()
+                orchestrator.register_agent('data_loader', data_loader)
+                orchestrator.register_agent('inference', inference)
+                orchestrator.register_agent('xai', xai)
+                orchestrator.register_agent('report', report)
+                orchestrator.register_agent('dashboard', dashboard)
+                
+                # 초기화
+                asyncio.run(orchestrator.initialize())
+                
+                st.session_state.orchestrator = orchestrator
+                st.success("✓ 시스템 초기화 완료")
+            
+            except Exception as e:
+                st.error(f"❌ 초기화 실패: {e}")
+                st.session_state.is_running = False
+    
+    # ========================================
+    # 실시간 모니터링 루프
+    # ========================================
+    orchestrator = st.session_state.orchestrator
+    iteration = 0
+    
+st.set_page_config(layout="wide")
+
+# -----------------------
+# Utils (예시)
+# -----------------------
+def load_timeseries() -> pd.DataFrame:
+    """
+    예시: columns = ["ts", "sensor1", "sensor2", ...]
+    ts는 1초 단위 timestamp 또는 int index
+    """
+    # TODO: 기존 데이터로더로 교체
+    n = 300
+    df = pd.DataFrame({
+        "ts": pd.RangeIndex(1, n+1),   # 1초,2초,...처럼 쓰기 편하게 index화
+        "sensor1": range(n),
+        "sensor2": range(n),
+    })
+    return df
+
+def load_error_history() -> pd.DataFrame:
+    # TODO: 기존 에러 이력 로더로 교체
+    return pd.DataFrame({
+        "time": ["10:01:05", "10:03:10"],
+        "severity": ["Warning", "Danger"],
+        "msg": ["pump vibration high", "temp spike"],
+    })
+
+def build_report_for_time(selected_end_ts: int) -> str:
+    # TODO: 실제 report 생성(LLM/DB) 로직으로 교체
+    return f"""
+### Report (end={selected_end_ts}s)
+- Alarm time: {selected_end_ts}s
+- Root cause: (placeholder)
+- Action: (placeholder)
+"""
+
+def plot_window(df_win: pd.DataFrame):
+    # 센서 여러개면 melt해서 라인 여러개 그리는 방식 추천
+    df_m = df_win.melt(id_vars=["ts"], var_name="sensor", value_name="value")
+    fig = px.line(df_m, x="ts", y="value", color="sensor")
+    fig.update_layout(height=350, margin=dict(l=10, r=10, t=30, b=10))
+    return fig
+
+
+# -----------------------
+# State
+# -----------------------
+if "selected_end" not in st.session_state:
+    st.session_state.selected_end = None
+
+df = load_timeseries()
+n = len(df)
+
+# 탭 2개만
+tab_viz, tab_history = st.tabs(["시계열 시각화", "에러 이력"])
+
+# =========================================================
+# 탭 1) 시계열 시각화 + 오른쪽 리포트
+# =========================================================
+with tab_viz:
+    # ✅ “기존 결과 누적 방지”: 탭 전체를 감싸는 placeholder
+    tab1_root = st.empty()
+
+    with tab1_root.container():
+        st.subheader("시계열 데이터 시각화")
+
+        # end_idx를 슬라이더로 선택 (1초 단위)
+        # ts가 1..n 이라고 가정했지만 timestamp면 mapping만 바꾸면 됨
+        end_ts = st.slider(
+            "시간 선택 (윈도우 끝 시점)",
+            min_value=1,
+            max_value=n,
+            value=min(32, n),
+            step=1,
+            key="end_ts_slider",
+        )
+
+        # ✅ 32 길이 sliding window
+        window_len = 32
+        end_idx = end_ts - 1
+        start_idx = max(0, end_idx - window_len + 1)
+
+        df_win = df.iloc[start_idx:end_idx+1].copy()
+
+        # 좌/우 컬럼: 오른쪽을 “사이드창”처럼 사용
+        left, right = st.columns([3, 2], gap="large")
+
+        with left:
+            st.caption(f"표시 구간: {df_win['ts'].iloc[0]}s ~ {df_win['ts'].iloc[-1]}s (max {window_len})")
+            st.plotly_chart(plot_window(df_win), use_container_width=True)
+
+        with right:
+            # 선택 시간에 대한 리포트 생성/로드
+            report_md = build_report_for_time(end_ts)
+            st.markdown(report_md)
+
+        # “최종 결과만”: 매 rerun마다 tab1_root는 동일 컨테이너 하나만 렌더링되므로 누적 없음
+
+
+# =========================================================
+# 탭 2) 에러 이력 (누적 방지)
+# =========================================================
+with tab_history:
+    tab2_root = st.empty()
+
+    with tab2_root.container():
+        st.subheader("에러 이력")
+
+        err_df = load_error_history()
+
+        # 예: 필터/검색이 있다면 여기에
+        # severity = st.multiselect("Severity", sorted(err_df["severity"].unique()))
+
+        st.dataframe(err_df, use_container_width=True)
+
+else:
+    st.info("🔄 'CSV 파일을 선택하고 '시작' 버튼을 클릭하세요.")

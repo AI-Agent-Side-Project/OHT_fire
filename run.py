@@ -5,6 +5,7 @@ import torch.backends
 import random
 import numpy as np
 import pdb
+import json
 from exp.exp_classification import Exp_Classification
 from utils.print_args import print_args
 
@@ -13,6 +14,21 @@ if __name__ == '__main__':
     random.seed(fix_seed)
     torch.manual_seed(fix_seed)
     np.random.seed(fix_seed)
+
+    def save_config(args, path):
+        """Save arguments to config.json"""
+        config = vars(args).copy()
+        # Convert torch device to string for JSON serialization
+        if isinstance(config.get('device'), torch.device):
+            config['device'] = str(config['device'])
+        if 'device_ids' in config and isinstance(config['device_ids'], list):
+            config['device_ids'] = str(config['device_ids'])
+        
+        os.makedirs(path, exist_ok=True)
+        config_path = os.path.join(path, 'config.json')
+        with open(config_path, 'w') as f:
+            json.dump(config, f, indent=4)
+        print(f"✓ Config saved to {config_path}")
 
     parser = argparse.ArgumentParser()
 
@@ -92,6 +108,10 @@ if __name__ == '__main__':
         for ii in range(args.itr):
             exp = Exp(args)
             setting = '{}_dm{}_dff{}_topk{}_sl{}_n{}'.format('TSC', args.d_model, args.d_ff, args.top_k, args.seq_len, args.norm)
+            
+            # Save config to checkpoint directory
+            path = os.path.join(args.checkpoints, setting)
+            save_config(args, path)
 
             print('>>>>>>>start training : {}>>>>>>>>>>>>>>>>>>>>>>>>>>'.format(setting))
             exp.train(setting)

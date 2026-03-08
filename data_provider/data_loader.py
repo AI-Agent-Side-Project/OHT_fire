@@ -6,6 +6,7 @@ import re
 import torch
 import pdb
 import pickle
+import joblib
 from torch.utils.data import Dataset, DataLoader
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler
 import warnings
@@ -106,6 +107,20 @@ class OHT_fire_Loader(Dataset):
     def get_scaler(self):
         """Get the scaler object"""
         return self.scaler
+    
+    def save_scaler(self, save_path):
+        """
+        Save the scaler to a pickle file using joblib
+        
+        Args:
+            save_path: Path to save the scaler.pkl file
+        """
+        if self.scaler is not None:
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            joblib.dump(self.scaler, save_path)
+            print(f"✓ Scaler saved to {save_path}")
+        else:
+            print("✗ No scaler to save")
         
     def __getitem__(self, index):
         data = self.datas_df[index]

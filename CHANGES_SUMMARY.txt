@@ -1,0 +1,358 @@
+"""
+OHT_fire Report Agent 개선사항 - 최종 요약
+==============================================
+
+이 문서는 Report Agent에 적용된 모든 변경사항을 요약합니다.
+"""
+
+# ============================================================================
+# 1. NORMAL 상태에서 REPORT 생성 제외
+# ============================================================================
+
+변경전: 모든 상태(Normal, Grey, Warning, Danger)에서 report 생성
+변경후: Grey, Warning, Danger 상태만 report 생성
+
+구현 위치: agents/report_agent.py - _run() 메서드
+코드:
+    if predicted_class == 0:  # Normal
+        return {
+            'should_report': False,
+            'reason': 'Normal 상태에서는 report 생성 안함'
+        }
+
+# ============================================================================
+# 2. 이전 결과와 다를 때만 REPORT 생성
+# ============================================================================
+
+변경전: 매번 report 생성
+변경후: 같은 상태가 반복되면 report 생성 안함
+
+구현:
+- self.last_inference_result: 이전 inference 결과 저장
+- 현재 결과와 비교해서 다를 때만 report 생성
+
+예시:
+    Last:    Warning (2)
+    Current: Warning (2)
+    → Report 생성 안함
+    
+    Last:    Warning (2)
+    Current: Danger (3)
+    → Report 생성
+
+# ============================================================================
+# 3. RAG (VectorDB) 기반 과거 보고서 참고
+# ============================================================================
+
+추가된 기능:
+1. VectorDB 초기화 (_initialize)
+   - Chroma VectorDB 사용
+   - OllamaEmbeddings로 embedding
+   - report_db/ 디렉토리에 저장
+
+2. 유사 보고서 검색 (_run)
+   - 현재 상태 + 주요 특성 기반 쿼리 생성
+   - similarity_search_with_score(k=3)로 상위 3개 검색
+   - LLM 프롬프트에 포함
+
+3. 최종 보고서 VectorDB 저장 (finalize_report)
+   - 사용자 조치 + 최종 분석을 메타데이터와 함께 저장
+   - 향후 유사 상황에서 참고 가능
+
+# ============================================================================
+# 4. 2단계 보고서 생성 프로세스
+# ============================================================================
+
+[1차 보고서 - 초안 (LLM 생성)]
+    ↓
+입력: predicted_class, top_features, similar_reports
+출력: interpretation_text, recommendations
+저장: report_history/draft/{report_id}.json
+상태: 'draft'
+
+[사용자 조치 입력]
+    ↓
+Streamlit UI의 "📄 보고서 관리" 탭
+사용자가 실제 수행한 조치 입력
+
+[최종 보고서 (LLM 생성)]
+    ↓
+입력: 1차 분석 + 사용자 조치
+출력: final_interpretation
+저장: 
+  1. report_history/final/{report_id}_final.json
+  2. VectorDB (Chroma)
+상태: 'final'
+
+# ============================================================================
+# 5. 불필요한 정보 제거
+# ============================================================================
+
+제거된 필드:
+- confidence (신뢰도) → 이제 표시 안함
+- probabilities (클래스 확률 분포) → 불필요
+- predicted_class (number) → level로 충분
+
+보존된 필드:
+✓ timestamp - 발생 시간
+✓ level - 0~3 (숫자)
+✓ level_name - 'Normal', 'Grey Zone', 'Warning', 'Danger'
+✓ top_features - XAI 상위 특성 (기여도만)
+✓ interpretation_text - LLM 해석
+✓ recommendations - 권장사항
+✓ status - 'draft' 또는 'final'
+✓ user_action - 사용자가 입력한 조치 (final만)
+✓ final_interpretation - LLM이 생성한 최종 분석 (final만)
+
+# ============================================================================
+# 6. 마크다운/HTML 보고서 간결화
+# ============================================================================
+
+변경전:
+# Report
+## 기본 정보
+- 신뢰도: 85.3%
+- 예측 클래스: 2
+## 클래스 확률 분포
+- Normal: ████░░░░░░░░░░░░░░ 20.0%
+- Grey Zone: ██░░░░░░░░░░░░░░░░ 10.0%
+...
+
+변경후:
+# 🚨 Danger - 실시간 모니터링 보고서
+## 📊 기본 정보
+- **시간**: 2024-03-07T12:34:56
+- **상태**: Danger
+## 🔍 분석 해석
+> LLM이 생성한 분석 텍스트 (2-3문장)
+## ⭐ 상위 영향 특성
+| 순위 | 특성명 | 기여도 |
+|------|--------|--------|
+| 1 | PM10 | 35.0% |
+## 💡 권장사항
+1. 센서 교정 필요
+2. ...
+
+# ============================================================================
+# 7. 파일 구조
+# ============================================================================
+
+OHT_fire/
+├── report_history/              ← NEW
+│   ├── draft/                   ← 1차 보고서 (초안)
+│   │   ├── report_20240307_123456.json
+│   │   ├── report_20240307_123457.json
+│   │   └── ...
+│   └── final/                   ← 2차 보고서 (최종)
+│       ├── report_20240307_123456_final.json
+│       ├── report_20240307_123457_final.json
+│       └── ...
+├── report_db/                   ← NEW (VectorDB)
+│   ├── chroma.sqlite3
+│   ├── data/
+│   └── ...
+├── agents/
+│   ├── report_agent.py          ← MODIFIED
+│   ├── orchestrator.py          ← MODIFIED
+│   ├── ...
+├── streamlit_realtime.py        ← MODIFIED
+├── requirements_streamlit.txt   ← MODIFIED
+├── REPORT_IMPROVEMENTS.md       ← NEW (상세 문서)
+├── test_report_changes.py       ← NEW (테스트 코드)
+└── ...
+
+# ============================================================================
+# 8. Streamlit UI 변경사항
+# ============================================================================
+
+추가된 탭: "📄 보고서 관리"
+
+기능:
+1. 대기 중인 보고서 목록 표시
+2. 1차 분석 내용 표시
+3. 영향 특성 및 권장사항 표시
+4. 사용자 조치 입력 텍스트 에어리어
+5. "✅ 최종 보고서 생성" 및 "❌ 취소" 버튼
+
+흐름:
+1. Inference → Warning/Danger 상태
+2. Report Agent → 1차 보고서 생성 (should_report: True)
+3. Streamlit UI → "📄 보고서 관리" 탭에 표시
+4. 사용자 → 조치 입력 후 "최종 보고서 생성" 클릭
+5. Report Agent → finalize_report() 호출
+6. LLM → 최종 보고서 생성
+7. 저장 → report_history/final/ + VectorDB
+8. UI → 리스트에서 제거
+
+# ============================================================================
+# 9. 주요 메서드 및 반환값
+# ============================================================================
+
+메서드: report_agent.execute(input_data)
+
+입력:
+{
+    'predicted_class': int,       # 0: Normal, 1: Grey, 2: Warning, 3: Danger
+    'top_features': [             # XAI 상위 특성
+        {'name': 'PM10', 'contribution': 0.35},
+        {'name': 'NTC', 'contribution': 0.25},
+        ...
+    ],
+    'timestamp': str,
+    'feature_names': list
+}
+
+출력:
+{
+    'should_report': bool,        # Report 생성 여부
+    'reason': str,                # 미생성 이유 (should_report=False일 때)
+    'report_id': str,             # Report ID (should_report=True일 때)
+    'markdown': str,              # 마크다운 형식 보고서
+    'html': str,                  # HTML 형식 보고서
+    'summary': str,               # 한 줄 요약
+    'json': dict                  # Report JSON 객체
+}
+
+메서드: report_agent.finalize_report(report_id, user_action)
+
+입력:
+- report_id: str                 # Draft report의 ID
+- user_action: str               # 사용자가 수행한 조치
+
+출력:
+{
+    'success': bool,
+    'report_id': str,
+    'final_report': dict,         # 최종 보고서 JSON
+    'file_path': str              # 저장된 파일 경로
+}
+
+# ============================================================================
+# 10. 설정 및 의존성
+# ============================================================================
+
+새로 추가된 의존성:
+- chromadb >= 0.4.0              # VectorDB
+- plotly >= 5.0.0                # 차트 (기존에는 없었음)
+
+기존 의존성:
+- langchain >= 0.1.0
+- langchain-community >= 0.0.10
+
+선택사항:
+- ollama (LLM)                   # 설치 필요, 없어도 기본 해석 제공
+- Ollama 모델 (mistral, llama2)  # 필요 시 다운로드
+
+# ============================================================================
+# 11. 환경 변수 및 설정
+# ============================================================================
+
+ReportAgent 생성 시 설정:
+```python
+report_agent = ReportAgent(
+    ollama_model="mistral",           # LLM 모델
+    ollama_base_url="http://localhost:11434",  # Ollama URL
+    use_vectordb=True,                # VectorDB 활성화
+    vectordb_persist_dir="report_db"  # VectorDB 저장 경로
+)
+```
+
+# ============================================================================
+# 12. 테스트
+# ============================================================================
+
+테스트 코드: test_report_changes.py
+
+실행:
+$ python test_report_changes.py
+
+테스트 항목:
+1. Normal 상태 - report 생성 안함
+2. Warning 상태 - report 생성
+3. 같은 결과 - report 생성 안함
+4. Danger 상태 - report 생성
+5. 보고서 내용 확인 (불필요한 정보 제거)
+6. 최종 보고서 생성 (사용자 조치 입력)
+7. 보고서 디렉토리 구조 확인
+
+# ============================================================================
+# 13. 로깅
+# ============================================================================
+
+Report Agent는 다음과 같이 로깅합니다:
+
+LLM 초기화:
+[Report] INFO: LLM (Ollama - mistral) 연결 완료
+
+VectorDB 초기화:
+[Report] INFO: VectorDB (Chroma) 연결 완료
+
+RAG 검색:
+[Report] INFO: 유사 보고서 3개 검색됨
+
+Draft 보고서 저장:
+[Report] INFO: 1차 보고서 저장: report_history/draft/report_....json
+
+Final 보고서 저장:
+[Report] INFO: 최종 보고서 저장: report_history/final/report_..._final.json
+[Report] INFO: 최종 보고서를 VectorDB에 저장
+
+VectorDB 종료:
+[Report] INFO: VectorDB 저장 완료
+
+# ============================================================================
+# 14. 주의사항
+# ============================================================================
+
+1. VectorDB 활성화
+   - use_vectordb=True로 설정 필요
+   - chromadb 패키지 필수
+   - 처음 생성 시 embedding 모델 다운로드
+
+2. LLM 선택사항
+   - Ollama 없어도 기본 해석 제공
+   - LLM 연결 실패 시 자동으로 기본 해석으로 전환
+
+3. 보고서 저장 위치
+   - report_history/ 디렉토리는 자동 생성
+   - 경로 변경 시 권한 확인
+
+4. 동시 실행
+   - 여러 프로세스에서 동시 접근 시 락 필요
+   - 현재는 단일 프로세스 기준
+
+# ============================================================================
+# 15. 향후 개선 방향
+# ============================================================================
+
+1. 데이터베이스 연동
+   - PostgreSQL, MongoDB 등에 보고서 저장
+   - 더 강력한 쿼리 및 분석
+
+2. 고급 RAG
+   - HyperParameter 튜닝
+   - 문맥 기반 검색 개선
+   - 결과의 관련성 평가
+
+3. 자동 조치 추천
+   - 과거 유사 케이스 분석
+   - 자주 사용된 조치 자동 제시
+
+4. 알림 시스템
+   - Danger 상태 시 즉시 알림
+   - 이메일, Slack 통합
+
+5. 분석 대시보드
+   - 보고서 통계 및 트렌드
+   - 시간대별 이상 발생 빈도
+   - 주요 원인 분석
+
+6. 다중 LLM 지원
+   - OpenAI GPT
+   - Anthropic Claude
+   - Local LLaMA, Mistral
+
+# ============================================================================
+"""
+
+print(__doc__)
