@@ -518,3 +518,87 @@ Class Distribution in Predictions:
         print("="*50 + "\n")
         
         return analysis_results
+    
+    def extract_background_data(self, setting, class_label=0, num_samples=None):
+        """
+        Normal class(class_label=0) 데이터를 배경 데이터로 추출 및 저장
+        SHAP의 배경 데이터로 사용하기 위함
+        
+        Args:
+            setting: 모델 설정명
+            class_label: 배경 데이터로 사용할 클래스 (기본값: 0 = Normal)
+            num_samples: 최대 샘플 수 (None이면 모두 사용)
+        
+        Returns:
+            np.ndarray: 배경 데이터 (shape: [num_samples, num_features])
+        """
+        print("\n" + "="*50)
+        print(f"Extracting background data from class {class_label}...")
+        print("="*50)
+        
+        # 트레이닝 데이터 로드 (Normal class 샘플)
+        train_data, train_loader = self._get_data(flag='TRAIN')
+        
+        background_samples = []
+        background_labels = []
+        
+        # 트레이닝 데이터에서 해당 클래스만 추출
+        for batch_x, label in train_loader:
+            # 해당 클래스의 샘플만 필터링
+            mask = label == class_label
+            if mask.any():
+                filtered_x = batch_x[mask]  # (batch, seq_len, features)
+                filtered_labels = label[mask]
+                
+                background_samples.append(filtered_x.numpy())
+                background_labels.append(filtered_labels.numpy())
+        
+        if not background_samples:
+            print(f"⚠ No samples found for class {class_label}")
+            return None
+        
+        # 배열 연결 및 정규화된 데이터만 추출
+        background_data = np.concatenate(background_samples, axis=0)  # (N, seq_len, features)
+        background_labels = np.concatenate(background_labels, axis=0)  # (N,)
+        
+        print(f"Total samples for class {class_label}: {len(background_data)}")
+        
+        # seq_len 차원을 평탄화 (SHAP에 전달할 형태로 변환)
+        # (N, seq_len, features) → (N, seq_len * features)
+        batch_size, seq_len, num_features = background_data.shape
+        background_data_flat = background_data.reshape(batch_size, -1)
+        
+        # num_samples 제한 적용
+        if num_samples is not None and len(background_data_flat) > num_samples:
+            background_data_flat = background_data_flat[:num_samples]
+        
+        print(f"Background data shape: {background_data_flat.shape}")
+        
+        # 저장 폴더
+        checkpoint_folder = os.path.join('./checkpoints/', setting)
+        os.makedirs(checkpoint_folder, exist_ok=True)
+        
+        # 배경 데이터 저장
+        background_path = os.path.join(checkpoint_folder, 'background_data.pkl')
+        joblib.dump(background_data_flat, background_path)
+        print(f"✓ Background data saved to: {background_path}")
+        
+        # 통계 정보 저장
+        stats = {
+            'shape': background_data_flat.shape,
+            'class_label': class_label,
+            'class_name': {0: 'Normal', 1: 'Grey Zone', 2: 'Warning', 3: 'Danger'}.get(class_label, 'Unknown'),
+            'mean': background_data_flat.mean(axis=0).tolist(),
+            'std': background_data_flat.std(axis=0).tolist(),
+            'min': background_data_flat.min(axis=0).tolist(),
+            'max': background_data_flat.max(axis=0).tolist()
+        }
+        
+        stats_path = os.path.join(checkpoint_folder, 'background_stats.json')
+        with open(stats_path, 'w') as f:
+            json.dump(stats, f, indent=4)
+        print(f"✓ Background statistics saved to: {stats_path}")
+        
+        print("="*50 + "\n")
+        
+        return background_data_flat

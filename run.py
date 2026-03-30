@@ -119,6 +119,10 @@ if __name__ == '__main__':
             print('>>>>>>>testing : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))
             exp.test(setting)
             
+            # Extract background data (Normal class) for SHAP
+            print('>>>>>>>Extract background data : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))
+            exp.extract_background_data(setting, class_label=0, num_samples=200)
+            
             # XAI analysis after testing
             if args.use_xai:
                 print('>>>>>>>XAI analysis : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))

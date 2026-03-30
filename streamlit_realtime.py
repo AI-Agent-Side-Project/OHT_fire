@@ -16,6 +16,9 @@ from datetime import datetime
 import time
 import pickle
 import pdb
+import os
+import traceback
+import joblib
 
 from agents import (
     DataLoaderAgent,
@@ -96,13 +99,13 @@ with st.sidebar:
     col1, col2 = st.columns(2)
     
     with col1:
-        if st.button("🟢 시작", use_container_width=True, key="start_btn"):
+        if st.button("🟢 시작", width='stretch', key="start_btn"):
             st.session_state.is_running = True
             st.session_state.orchestrator = None  # 새로 시작할 때 재초기화
             st.rerun()
     
     with col2:
-        if st.button("🛑 중지", use_container_width=True, key="stop_btn"):
+        if st.button("🛑 중지", width='stretch', key="stop_btn"):
             st.session_state.is_running = False
             st.rerun()
     
@@ -234,12 +237,27 @@ if st.session_state.is_running and st.session_state.csv_path:
                 
                 feature_names = ['NTC', 'PM10', 'PM2.5', 'PM1.0', 'CT1', 'CT2', 'CT3', 'CT4', 
                     'ex_temperature', 'ex_humidity', 'ex_illuminance']
-                def model_predict(x):
-                    return np.random.randn(x.shape[0], 4)
+                
+                # InferenceAgent에서 실제 모델 예측 함수 가져오기
+                model_predict = inference.get_predict_function()
+                
+                # 저장된 배경 데이터 로드 (Normal class 샘플)
+                background_data_path = os.path.join(
+                    st.session_state.checkpoint_path, 
+                    'background_data.pkl'
+                )
+                background_data = None
+                if os.path.exists(background_data_path):
+                    background_data = joblib.load(background_data_path)
+                    st.info(f"✓ 배경 데이터 로드됨: {background_data.shape}")
+                else:
+                    st.warning(f"⚠ 배경 데이터 파일 없음: {background_data_path}")
+                    st.info("💡 run.py로 모델 학습 시 자동 생성됩니다")
                 
                 xai = XAIAgent(
                     model=model_predict,
-                    feature_names=feature_names
+                    feature_names=feature_names,
+                    background_data=background_data
                 )
                 
                 report = ReportAgent()
@@ -356,7 +374,7 @@ if st.session_state.is_running and st.session_state.csv_path:
                     st.session_state.current_window = window_df
                     with placeholder_chart.container():
                         st.markdown("### 📈 현재 윈도우 데이터 (sliding window)")
-                        st.plotly_chart(plot_window(window_df), use_container_width=True)
+                        st.plotly_chart(plot_window(window_df), width='stretch')
             else:
                 st.error(f"❌ 파이프라인 오류: {result.get('error', 'Unknown')}")
         
@@ -500,8 +518,6 @@ if st.session_state.is_running and st.session_state.csv_path:
             
             else:
                 st.info("현재 대기 중인 보고서가 없습니다")
-
-        time.sleep(1)
 
         st.rerun()
     

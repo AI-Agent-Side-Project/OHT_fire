@@ -199,6 +199,54 @@ class InferenceAgent(BaseAgent):
             'raw_input': window_data.tolist()
         }
 
+    def get_predict_function(self):
+        """SHAP 등에서 사용할 수 있는 예측 함수 반환"""
+        def predict_fn(x):
+            """
+            입력: np.ndarray (batch_size, num_features)
+            출력: np.ndarray (batch_size, num_classes)
+            """
+            if x.ndim == 2:
+                # (batch, features) 형태
+                batch_size = x.shape[0]
+                num_features = x.shape[1]
+            else:
+                # (features,) 형태
+                x = x.reshape(1, -1)
+                batch_size = 1
+                num_features = x.shape[1]
+            
+            # 센서 수 조정
+            expected_sensors = self.config.get('enc_in', num_features) if isinstance(self.config, dict) else num_features
+            
+            if num_features > expected_sensors:
+                x = x[:, :expected_sensors]
+            elif num_features < expected_sensors:
+                padding = np.zeros((x.shape[0], expected_sensors - num_features))
+                x = np.hstack([x, padding])
+            
+            # (batch, enc_in) → (batch, enc_in, seq_len)
+            # SHAP 입력은 (batch, features)이므로 seq_len=1로 취급
+            x_reshaped = x[:, np.newaxis, :]  # (batch, 1, enc_in)
+            x_reshaped = np.transpose(x_reshaped, (0, 2, 1))  # (batch, enc_in, 1)
+            
+            x_tensor = torch.from_numpy(x_reshaped).float()
+            x_tensor = x_tensor.to(self.device)
+            
+            with torch.no_grad():
+                if self.model is not None:
+                    output = self.model(x_tensor)
+                    logits = output.cpu().numpy()
+                else:
+                    # Dummy 예측
+                    logits = np.random.randn(batch_size, 4)
+            
+            # Softmax 확률 반환
+            probabilities = np.array([self._softmax(logit) for logit in logits])
+            return probabilities
+        
+        return predict_fn
+
     async def _cleanup(self):
         """리소스 정리"""
         if self.model is not None:

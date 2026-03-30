@@ -17,12 +17,13 @@ from .base_agent import BaseAgent
 class XAIAgent(BaseAgent):
     """XAI (SHAP) 해석 에이전트"""
 
-    def __init__(self, model, feature_names: List[str], num_top_features: int = 5):
+    def __init__(self, model, feature_names: List[str], num_top_features: int = 5, background_data: np.ndarray = None):
         """
         Args:
             model: 추론 함수 (입력: np.ndarray, 출력: np.ndarray)
             feature_names: 특성 이름 리스트
             num_top_features: 상위 N개 특성 표시
+            background_data: SHAP 배경 데이터 (없으면 자동 생성)
         """
         super().__init__(
             agent_id="XAI-SHAP",
@@ -32,24 +33,31 @@ class XAIAgent(BaseAgent):
         self.model = model
         self.feature_names = feature_names
         self.num_top_features = num_top_features
+        self.background_data = background_data
         self.explainer = None
 
     async def _initialize(self):
         """SHAP Explainer 생성"""
         # KernelExplainer 사용 (모든 모델 타입 지원)
         # background_data: 설명의 기준이 되는 배경 데이터
-        # 간단한 배경 데이터 생성 (정규분포)
-        background_data = np.random.normal(0.5, 0.2, (100, len(self.feature_names)))
-        background_data = np.clip(background_data, 0, 1)
+        
+        # 배경 데이터 설정
+        if self.background_data is None:
+            # 배경 데이터 미제공 시 정규분포로 생성
+            self.background_data = np.random.normal(0.5, 0.2, (100, len(self.feature_names)))
+            self.background_data = np.clip(self.background_data, 0, 1)
+            self.logger.info("SHAP 배경 데이터: 자동 생성 (정규분포)")
+        else:
+            self.logger.info(f"SHAP 배경 데이터: 실제 데이터 사용 ({len(self.background_data)}개 샘플)")
         
         self.explainer = shap.KernelExplainer(
             self.model,
-            background_data
+            self.background_data
         )
         
         self.logger.info(
             f"SHAP Explainer 생성 완료 "
-            f"(특성: {len(self.feature_names)}개)"
+            f"(특성: {len(self.feature_names)}개, 배경 샘플: {len(self.background_data)}개)"
         )
 
     async def _run(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
